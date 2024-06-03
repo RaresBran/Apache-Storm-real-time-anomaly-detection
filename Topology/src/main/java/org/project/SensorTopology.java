@@ -18,7 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class SensorTopology extends ConfigurableTopology {
-    private static final String FILENAME = "./docker/data/iot_telemetry_data.csv";
+    private static final String FILENAME = "./Topology/src/main/resources/iot_telemetry_data.csv";
     private static final String[] DEVICES = {"b8:27:eb:bf:9d:51", "00:0f:00:70:91:0a", "1c:bf:ce:15:ec:4d"};
     private static final Logger log = LoggerFactory.getLogger(SensorTopology.class);
 
