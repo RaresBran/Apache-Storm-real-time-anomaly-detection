@@ -17,16 +17,22 @@ import java.util.Map;
 public class DataBlockedBolt extends BaseRichBolt {
     private static final Logger log = LoggerFactory.getLogger(DataBlockedBolt.class);
     private OutputCollector collector;
-    private Map<String, LinkedList<Double>> sensorValues;
-    private Map<String, Integer> counts;
+
+    // Map to store the last seen value and the timestamp when it was first observed
+    private static class SensorData {
+        double value;
+        long startTime;
+        LinkedList<Double> window;
+    }
+
+    private Map<String, Map<String, SensorData>> deviceSensorData;
     private static final int WINDOW_SIZE = 10; // Window size for statistical analysis
-    private static final double THRESHOLD_SIGMA = 3.0; // 3-sigma threshold
+    private static final long BLOCK_DURATION_MS = 12 * 60 * 60 * 1000L; // 12 hours in milliseconds
 
     @Override
     public void prepare(Map stormConf, TopologyContext context, OutputCollector collector) {
         this.collector = collector;
-        this.sensorValues = new HashMap<>();
-        this.counts = new HashMap<>();
+        this.deviceSensorData = new HashMap<>();
     }
 
     @Override
@@ -41,69 +47,70 @@ public class DataBlockedBolt extends BaseRichBolt {
         sensorData.put("smoke", input.getDoubleByField("smoke"));
         sensorData.put("temp", input.getDoubleByField("temp"));
 
-        Map<String, Double> cleanedData = new HashMap<>();
+        boolean rejected = false;
 
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
             String sensor = entry.getKey();
             double value = entry.getValue();
 
-            // Maintain a sliding window of values for each sensor
-            sensorValues.putIfAbsent(sensor, new LinkedList<>());
-            LinkedList<Double> values = sensorValues.get(sensor);
+            // Initialize device data map if it doesn't exist
+            deviceSensorData.putIfAbsent(device, new HashMap<>());
+            Map<String, SensorData> sensorMap = deviceSensorData.get(device);
 
-            if (values.size() >= WINDOW_SIZE) {
-                values.removeFirst();
+            // Initialize sensor data if it doesn't exist
+            sensorMap.putIfAbsent(sensor, new SensorData());
+            SensorData data = sensorMap.get(sensor);
+
+            if (data.value == value) {
+                // Value is the same, check duration
+                if (ts - data.startTime >= BLOCK_DURATION_MS) {
+                    // Data has been blocked for 12 hours, reject
+                    log.warn("Data blocked for sensor {} on device {} at timestamp {}", sensor, device, ts);
+                    rejected = true;
+                }
+            } else {
+                // Value has changed, reset start time
+                data.value = value;
+                data.startTime = ts;
             }
-            values.addLast(value);
+
+            // Maintain a sliding window of values for each sensor
+            data.window = data.window == null ? new LinkedList<>() : data.window;
+            if (data.window.size() >= WINDOW_SIZE) {
+                data.window.removeFirst();
+            }
+            data.window.addLast(value);
 
             // Calculate mean and standard deviation
-            double mean = values.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-            double variance = values.stream().mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0.0);
+            double mean = data.window.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+            double variance = data.window.stream().mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0.0);
             double stdDev = Math.sqrt(variance);
 
             // Check if the value is within the 3-sigma range
-            if (Math.abs(value - mean) <= THRESHOLD_SIGMA * stdDev) {
-                counts.put(sensor, counts.getOrDefault(sensor, 0) + 1);
-            } else {
-                counts.put(sensor, 0);
+            if (Math.abs(value - mean) > 3.0 * stdDev) {
+                // Reset start time if value is outside the 3-sigma range
+                data.startTime = ts;
             }
-
-            // Determine appropriate threshold based on sensor
-            int threshold;
-            switch (sensor) {
-                case "temp":
-                    threshold = 12; // Longer threshold for temperature
-                    break;
-                default:
-                    threshold = 5; // Default threshold for other sensors
-            }
-
-            if (counts.get(sensor) >= threshold) {
-                // Data is blocked at constant value, reject
-                log.warn("Data blocked for sensor {} on device {} at timestamp {}", sensor, device, ts);
-                return;
-            }
-
-            cleanedData.put(sensor, value);
         }
 
         // Emit cleaned data
         collector.emit(new Values(
                 ts,
                 device,
-                cleanedData.get("co"),
-                cleanedData.get("humidity"),
+                sensorData.get("co"),
+                sensorData.get("humidity"),
                 input.getBooleanByField("light"),
-                cleanedData.get("lpg"),
+                sensorData.get("lpg"),
                 input.getBooleanByField("motion"),
-                cleanedData.get("smoke"),
-                cleanedData.get("temp")
+                sensorData.get("smoke"),
+                sensorData.get("temp"),
+                rejected
         ));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

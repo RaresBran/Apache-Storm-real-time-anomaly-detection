@@ -37,6 +37,8 @@ public class MeanShiftBolt extends BaseRichBolt {
         sensorData.put("smoke", input.getDoubleByField("smoke"));
         sensorData.put("temp", input.getDoubleByField("temp"));
 
+        boolean rejected = false;
+
         Map<String, Double> cleanedData = new HashMap<>();
 
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
@@ -63,7 +65,7 @@ public class MeanShiftBolt extends BaseRichBolt {
             if (Math.abs(currentMean - mean) > threshold) {
                 // Reject both segments in case of mean shift
                 log.warn("Mean shift detected");
-                return;
+                rejected = true;
             }
 
             cleanedData.put(sensor, value);
@@ -79,13 +81,14 @@ public class MeanShiftBolt extends BaseRichBolt {
                 cleanedData.get("lpg"),
                 input.getBooleanByField("motion"),
                 cleanedData.get("smoke"),
-                cleanedData.get("temp")
+                cleanedData.get("temp"),
+                rejected
         ));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

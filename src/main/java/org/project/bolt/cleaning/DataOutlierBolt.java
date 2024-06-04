@@ -50,24 +50,23 @@ public class DataOutlierBolt extends BaseRichBolt {
         double smoke = input.getDoubleByField("smoke");
         double temp = input.getDoubleByField("temp");
 
-        // Check bounds for each sensor measurement
-        if (co < CO_LOWER_BOUND || co > CO_UPPER_BOUND ||
+        boolean rejected = co < CO_LOWER_BOUND || co > CO_UPPER_BOUND ||
                 humidity < HUMIDITY_LOWER_BOUND || humidity > HUMIDITY_UPPER_BOUND ||
                 lpg < LPG_LOWER_BOUND || lpg > LPG_UPPER_BOUND ||
                 smoke < SMOKE_LOWER_BOUND || smoke > SMOKE_UPPER_BOUND ||
-                temp < TEMP_LOWER_BOUND || temp > TEMP_UPPER_BOUND) {
-            // Reject data outliers
+                temp < TEMP_LOWER_BOUND || temp > TEMP_UPPER_BOUND;
+
+        if (rejected) {
             log.warn("Data outlier detected");
-            return;
         }
 
         // Emit cleaned data
-        collector.emit(new Values(ts, device, co, humidity, light, lpg, motion, smoke, temp));
+        collector.emit(new Values(ts, device, co, humidity, light, lpg, motion, smoke, temp, rejected));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

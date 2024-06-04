@@ -34,11 +34,14 @@ public class NullValueBolt extends BaseRichBolt {
         sensorData.put("smoke", input.getDoubleByField("smoke"));
         sensorData.put("temp", input.getDoubleByField("temp"));
 
+        boolean rejected = false;
+
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
             if (Double.isNaN(entry.getValue())) {
                 // Reject null values
                 log.warn("NaN value detected");
-                return;
+                rejected = true;
+                break;
             }
         }
 
@@ -52,13 +55,14 @@ public class NullValueBolt extends BaseRichBolt {
                 sensorData.get("lpg"),
                 input.getBooleanByField("motion"),
                 sensorData.get("smoke"),
-                sensorData.get("temp")
+                sensorData.get("temp"),
+                rejected
         ));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

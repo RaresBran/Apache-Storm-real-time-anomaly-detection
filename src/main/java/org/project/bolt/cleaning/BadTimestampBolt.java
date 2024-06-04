@@ -35,7 +35,8 @@ public class BadTimestampBolt extends BaseRichBolt {
                 input.getDoubleByField("lpg"),
                 input.getBooleanByField("motion"),
                 input.getDoubleByField("smoke"),
-                input.getDoubleByField("temp")
+                input.getDoubleByField("temp"),
+                input.getBooleanByField("rejected")
         ));
         collector.ack(input);
     }
@@ -47,6 +48,6 @@ public class BadTimestampBolt extends BaseRichBolt {
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

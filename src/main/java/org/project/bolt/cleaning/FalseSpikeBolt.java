@@ -59,7 +59,7 @@ public class FalseSpikeBolt extends BaseRichBolt {
             // Example threshold for detecting spikes
             final double threshold = 3.0;
             if (Math.abs(value - mean) > threshold) {
-                log.warn("Interpolated false spike {}", value);
+                log.warn("Interpolated spike {}", value);
                 value = mean; // Replace spike with mean value
             }
 
@@ -76,13 +76,14 @@ public class FalseSpikeBolt extends BaseRichBolt {
                 cleanedData.get("lpg"),
                 input.getBooleanByField("motion"),
                 cleanedData.get("smoke"),
-                cleanedData.get("temp")
+                cleanedData.get("temp"),
+                input.getBooleanByField("rejected")
         ));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

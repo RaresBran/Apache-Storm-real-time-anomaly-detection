@@ -74,13 +74,14 @@ public class DataGapBolt extends BaseRichBolt {
                 cleanedData.get("lpg"),
                 input.getBooleanByField("motion"),
                 cleanedData.get("smoke"),
-                cleanedData.get("temp")
+                cleanedData.get("temp"),
+                input.getBooleanByField("rejected")
         ));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
     }
 }

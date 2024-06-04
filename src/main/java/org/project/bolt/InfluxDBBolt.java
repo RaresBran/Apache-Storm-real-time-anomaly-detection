@@ -39,6 +39,7 @@ public class InfluxDBBolt extends BaseRichBolt {
         boolean motion = tuple.getBooleanByField("motion");
         double smoke = tuple.getDoubleByField("smoke");
         double temp = tuple.getDoubleByField("temp");
+        boolean rejected  = tuple.getBooleanByField("rejected");
 
         // Create a point and write it to InfluxDB
         Point point = Point
@@ -51,6 +52,7 @@ public class InfluxDBBolt extends BaseRichBolt {
                 .addField("lpg", lpg)
                 .addField("motion", motion ? 1 : 0)  // Storing boolean as integer
                 .addField("smoke", smoke)
+                .addField("rejected", rejected)
                 .time(timestamp, WritePrecision.MS);
 
         WriteApiBlocking writeApi = influxDBClient.getWriteApiBlocking();
