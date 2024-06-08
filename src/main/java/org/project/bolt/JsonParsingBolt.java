@@ -38,8 +38,9 @@ public class JsonParsingBolt extends BaseRichBolt {
             double smoke = json.getDouble("smoke");
             double temp = json.getDouble("temp");
             boolean rejected = false;
+            boolean suspicious = false;
 
-            collector.emit(new Values(ts, device, co, humidity, light, lpg, motion, smoke, temp, rejected));
+            collector.emit(new Values(ts, device, co, humidity, light, lpg, motion, smoke, temp, rejected, suspicious));
         } catch (Exception e) {
             log.error("Error parsing JSON message: {}", message, e);
         } finally {
@@ -49,6 +50,6 @@ public class JsonParsingBolt extends BaseRichBolt {
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected", "suspicious"));
     }
 }

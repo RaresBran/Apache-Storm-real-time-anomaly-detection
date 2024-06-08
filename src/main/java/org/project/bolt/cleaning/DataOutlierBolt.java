@@ -10,6 +10,8 @@ import org.apache.storm.tuple.Values;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class DataOutlierBolt extends BaseRichBolt {
@@ -29,7 +31,7 @@ public class DataOutlierBolt extends BaseRichBolt {
     private static final double SMOKE_LOWER_BOUND = 0.0; // Smoke concentration lower bound
     private static final double SMOKE_UPPER_BOUND = 1000.0; // Smoke concentration upper bound
 
-    private static final double TEMP_LOWER_BOUND = -40.0; // Temperature in Celsius lower bound
+    private static final double TEMP_LOWER_BOUND = -90.0; // Temperature in Celsius lower bound
     private static final double TEMP_UPPER_BOUND = 85.0; // Temperature in Celsius upper bound
 
     @Override
@@ -39,14 +41,17 @@ public class DataOutlierBolt extends BaseRichBolt {
 
     @Override
     public void execute(Tuple input) {
-        long ts = input.getLongByField("ts");
-        String device = input.getStringByField("device");
+        boolean isRejected = input.getBooleanByField("rejected");
+        if (isRejected) {
+            // Emit the tuple as-is if it's rejected
+            collector.emit(input.getValues());
+            collector.ack(input);
+            return;
+        }
 
         double co = input.getDoubleByField("co");
         double humidity = input.getDoubleByField("humidity");
-        boolean light = input.getBooleanByField("light");
         double lpg = input.getDoubleByField("lpg");
-        boolean motion = input.getBooleanByField("motion");
         double smoke = input.getDoubleByField("smoke");
         double temp = input.getDoubleByField("temp");
 
@@ -60,13 +65,17 @@ public class DataOutlierBolt extends BaseRichBolt {
             log.warn("Data outlier detected");
         }
 
-        // Emit cleaned data
-        collector.emit(new Values(ts, device, co, humidity, light, lpg, motion, smoke, temp, rejected));
+        // Adjust the timestamp if necessary
+        List<Object> values = new ArrayList<>(input.getValues());
+        values.set(10, rejected);
+
+        // Emit cleaned data with adjusted timestamp
+        collector.emit(new Values(values.toArray()));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected", "suspicious"));
     }
 }

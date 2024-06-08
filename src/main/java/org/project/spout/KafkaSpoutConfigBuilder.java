@@ -9,8 +9,6 @@ import org.apache.storm.kafka.spout.KafkaSpoutRetryService;
 
 public class KafkaSpoutConfigBuilder {
 
-    public KafkaSpoutConfigBuilder() { }
-
     public static KafkaSpoutConfig<String, String> createKafkaSpoutConfig(String bootstrapServers, String topic) {
         KafkaSpoutRetryService retryService = new KafkaSpoutRetryExponentialBackoff(
                 KafkaSpoutRetryExponentialBackoff.TimeInterval.seconds(1),
@@ -23,9 +21,9 @@ public class KafkaSpoutConfigBuilder {
                 .setProp(ConsumerConfig.GROUP_ID_CONFIG, "storm-consumer-group")
                 .setProp(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName())
                 .setProp(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName())
-                .setProp(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
+                .setProp(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
                 .setRetry(retryService)
-                .setFirstPollOffsetStrategy(FirstPollOffsetStrategy.LATEST)
+                .setFirstPollOffsetStrategy(FirstPollOffsetStrategy.EARLIEST)
                 .build();
     }
 }

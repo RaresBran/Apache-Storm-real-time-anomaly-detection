@@ -1,30 +1,35 @@
 package org.project.bolt;
 
-import com.influxdb.client.InfluxDBClient;
-import com.influxdb.client.InfluxDBClientFactory;
-import com.influxdb.client.WriteApiBlocking;
 import com.influxdb.client.domain.WritePrecision;
-import com.influxdb.client.write.Point;
 import org.apache.storm.task.OutputCollector;
 import org.apache.storm.task.TopologyContext;
 import org.apache.storm.topology.OutputFieldsDeclarer;
 import org.apache.storm.topology.base.BaseRichBolt;
 import org.apache.storm.tuple.Tuple;
+import org.project.service.InfluxDBService;
+import com.influxdb.client.write.Point;
 
 import java.util.Map;
 
 public class InfluxDBBolt extends BaseRichBolt {
-    private transient InfluxDBClient influxDBClient;
     private transient OutputCollector collector;
+    private transient InfluxDBService influxDBService;
+    private final String influxDbUrl;
+    private final String bucket;
+    private final String org;
+    private final String token;
+
+    public InfluxDBBolt(String influxDbUrl, String bucket, String org, String token) {
+        this.influxDbUrl = influxDbUrl;
+        this.bucket = bucket;
+        this.org = org;
+        this.token = token;
+    }
 
     @Override
     public void prepare(Map stormConf, TopologyContext context, OutputCollector collector) {
         this.collector = collector;
-        String influxDbUrl = "http://localhost:8086"; // URL to InfluxDB
-        String bucket = "sensor-data"; // Database name
-        String org = "student";
-        String token = "wxeq02AqsDd8Qj8g9ICn1pvHQypGyblvDJQn1HldwXSZweOTw0-cyc7I6NVqmaeG1qk4ZLpQ3BzpiiQsSdwAuA==";
-        this.influxDBClient = InfluxDBClientFactory.create(influxDbUrl, token.toCharArray(), org, bucket);
+        this.influxDBService = new InfluxDBService(influxDbUrl, bucket, org, token);
     }
 
     @Override
@@ -40,6 +45,7 @@ public class InfluxDBBolt extends BaseRichBolt {
         double smoke = tuple.getDoubleByField("smoke");
         double temp = tuple.getDoubleByField("temp");
         boolean rejected  = tuple.getBooleanByField("rejected");
+        boolean suspicious  = tuple.getBooleanByField("suspicious");
 
         // Create a point and write it to InfluxDB
         Point point = Point
@@ -53,10 +59,10 @@ public class InfluxDBBolt extends BaseRichBolt {
                 .addField("motion", motion ? 1 : 0)  // Storing boolean as integer
                 .addField("smoke", smoke)
                 .addField("rejected", rejected)
+                .addField("suspicious", suspicious)
                 .time(timestamp, WritePrecision.MS);
 
-        WriteApiBlocking writeApi = influxDBClient.getWriteApiBlocking();
-        writeApi.writePoint(point);
+        influxDBService.writePoint(point);
 
         // Acknowledge the tuple
         collector.ack(tuple);
@@ -69,8 +75,8 @@ public class InfluxDBBolt extends BaseRichBolt {
 
     @Override
     public void cleanup() {
-        if (influxDBClient != null) {
-            influxDBClient.close();
+        if (influxDBService != null) {
+            influxDBService.close();
         }
     }
 }

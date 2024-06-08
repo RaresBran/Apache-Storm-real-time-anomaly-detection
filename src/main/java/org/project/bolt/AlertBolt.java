@@ -1,116 +1,96 @@
 package org.project.bolt;
 
+import com.influxdb.client.domain.WritePrecision;
 import org.apache.storm.task.OutputCollector;
 import org.apache.storm.task.TopologyContext;
 import org.apache.storm.topology.OutputFieldsDeclarer;
 import org.apache.storm.topology.base.BaseRichBolt;
-import org.apache.storm.tuple.Fields;
 import org.apache.storm.tuple.Tuple;
-import org.apache.storm.tuple.Values;
-import org.simplejavamail.api.email.Email;
-import org.simplejavamail.api.mailer.Mailer;
-import org.simplejavamail.api.mailer.config.TransportStrategy;
-import org.simplejavamail.email.EmailBuilder;
-import org.simplejavamail.mailer.MailerBuilder;
+import org.project.service.AlertService;
+import org.project.service.InfluxDBService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.LinkedList;
+import com.influxdb.client.write.Point;
+
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 public class AlertBolt extends BaseRichBolt {
-    private static final double CO_THRESHOLD = 10.0;
-    private static final double SMOKE_THRESHOLD = 5.0;
-    private static final double TEMP_THRESHOLD = 50.0;
     private static final Logger log = LoggerFactory.getLogger(AlertBolt.class);
-    private OutputCollector outputCollector;
-    private transient Mailer mailer;
+    private transient AlertService alertService;
+    private transient InfluxDBService influxDBService;
 
-    private static class SensorWindow {
-        LinkedList<Double> values = new LinkedList<>();
-        long startTime;
+    private final String influxDbUrl;
+    private final String bucket;
+    private final String org;
+    private final String token;
+
+    public AlertBolt(String influxDbUrl, String bucket, String org, String token) {
+        this.influxDbUrl = influxDbUrl;
+        this.bucket = bucket;
+        this.org = org;
+        this.token = token;
     }
-
-    private Map<String, SensorWindow> sensorWindows;
 
     @Override
     public void prepare(Map<String, Object> map, TopologyContext topologyContext, OutputCollector outputCollector) {
-        this.outputCollector = outputCollector;
-
-        mailer = MailerBuilder
-                .withSMTPServer("sandbox.smtp.mailtrap.io", 2525, "d4d2a3a004e61a", "1670639032d692")
-                .withTransportStrategy(TransportStrategy.SMTP_TLS)
-                .withDebugLogging(false)
-                .buildMailer();
-
-        sensorWindows = new HashMap<>();
-        sensorWindows.put("co", new SensorWindow());
-        sensorWindows.put("smoke", new SensorWindow());
-        sensorWindows.put("temp", new SensorWindow());
+        this.alertService = new AlertService();
+        this.influxDBService = new InfluxDBService(influxDbUrl, bucket, org, token);
     }
 
     @Override
     public void execute(Tuple tuple) {
-        long ts = tuple.getLongByField("ts");
-        double co = tuple.getDoubleByField("co");
-        double smoke = tuple.getDoubleByField("smoke");
-        double temp = tuple.getDoubleByField("temp");
+        String deviceId = tuple.getStringByField("deviceId");
+        String eventType = tuple.getStringByField("eventType");
+        String sensorType = tuple.getStringByField("sensorType");
+        long timestamp = tuple.getLongByField("timestamp");
+        boolean isSuspicious = tuple.getBooleanByField("isSuspicious");
+        double value = tuple.getDoubleByField("value");
 
-        updateSensorWindow(sensorWindows.get("co"), co, ts);
-        updateSensorWindow(sensorWindows.get("smoke"), smoke, ts);
-        updateSensorWindow(sensorWindows.get("temp"), temp, ts);
+        sendAlert(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
+        saveAlertToInfluxDB(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
+    }
 
-        double coMean = calculateMean(sensorWindows.get("co"));
-        double smokeMean = calculateMean(sensorWindows.get("smoke"));
-        double tempMean = calculateMean(sensorWindows.get("temp"));
+    private void sendAlert(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
+        String formattedTimestamp = formatTimestamp(timestamp);
+        String message = String.format("%s event for %s on device %s%nTimestamp: %s%nValue: %.2f%nSuspicious: %b",
+                eventType, sensorType, deviceId, formattedTimestamp, value, isSuspicious);
 
-        if (coMean > CO_THRESHOLD || smokeMean > SMOKE_THRESHOLD || tempMean > TEMP_THRESHOLD) {
-            sendAlert(coMean, smokeMean, tempMean, ts);
-            Values values = new Values(true, ts);
-            outputCollector.emit(values);
+        alertService.sendAlert(sensorType + " " + eventType + " Alert", message);
+        log.info("Email alert sent for device {}: {}", deviceId, message);
+    }
+
+    private void saveAlertToInfluxDB(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
+        Point point = Point
+                .measurement("event_alerts")
+                .addTag("device", deviceId)
+                .addField("eventType", eventType)
+                .addField("sensorType", sensorType)
+                .addField("value", value)
+                .addField("suspicious", isSuspicious)
+                .time(timestamp, WritePrecision.MS);
+
+        influxDBService.writePoint(point);
+    }
+
+    private String formatTimestamp(long timestamp) {
+        LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault());
+        return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    @Override
+    public void cleanup() {
+        if (influxDBService != null) {
+            influxDBService.close();
         }
-    }
-
-    private void updateSensorWindow(SensorWindow window, double value, long ts) {
-        window.values.addLast(value);
-        window.startTime = ts;
-        long currentTime = System.currentTimeMillis();
-
-        // Remove values older than 5 seconds
-        while (!window.values.isEmpty() && (currentTime - window.startTime) > 5000) {
-            window.values.removeFirst();
-        }
-    }
-
-    private double calculateMean(SensorWindow window) {
-        return window.values.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-    }
-
-    private void sendAlert(double coMean, double smokeMean, double tempMean, long timestamp) {
-        String message = """
-                Alert: Thresholds surpassed
-                CO Mean: %.2f
-                Smoke Mean: %.2f
-                Temp Mean: %.2f
-                Timestamp: %d
-                
-                :*
-                """.formatted(coMean, smokeMean, tempMean, timestamp);
-
-        Email email = EmailBuilder.startingBlank()
-                .from("Sensor Alerts", "sensor@alert.com")
-                .to("Admin", "raresbran@gmail.com")
-                .withSubject("Alert from Storm Topology")
-                .withPlainText(message)
-                .buildEmail();
-
-        log.info("Email alert sent");
-        mailer.sendMail(email);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer outputFieldsDeclarer) {
-        outputFieldsDeclarer.declare(new Fields("isAlertSent", "timestamp"));
+        // No output fields
     }
 }

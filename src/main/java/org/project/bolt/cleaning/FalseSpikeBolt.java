@@ -27,6 +27,14 @@ public class FalseSpikeBolt extends BaseRichBolt {
 
     @Override
     public void execute(Tuple input) {
+        boolean isRejected = input.getBooleanByField("rejected");
+        if (isRejected) {
+            // Emit the tuple as-is if it's rejected
+            collector.emit(input.getValues());
+            collector.ack(input);
+            return;
+        }
+
         long ts = input.getLongByField("ts");
         String device = input.getStringByField("device");
 
@@ -37,7 +45,7 @@ public class FalseSpikeBolt extends BaseRichBolt {
         sensorData.put("smoke", input.getDoubleByField("smoke"));
         sensorData.put("temp", input.getDoubleByField("temp"));
 
-        Map<String, Double> cleanedData = new HashMap<>();
+        boolean suspicious = false;
 
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
             String sensor = entry.getKey();
@@ -48,7 +56,7 @@ public class FalseSpikeBolt extends BaseRichBolt {
             LinkedList<Double> window = sensorWindows.get(sensor);
 
             // Example window size
-            final int windowSize = 5;
+            final int windowSize = 10;
             if (window.size() >= windowSize) {
                 window.removeFirst();
             }
@@ -59,31 +67,30 @@ public class FalseSpikeBolt extends BaseRichBolt {
             // Example threshold for detecting spikes
             final double threshold = 3.0;
             if (Math.abs(value - mean) > threshold) {
-                log.warn("Interpolated spike {}", value);
-                value = mean; // Replace spike with mean value
+                log.warn("Detected false spike in sensor {} on device {}: {}", sensor, device, value);
+                suspicious = true; // Mark as suspicious
             }
-
-            cleanedData.put(sensor, value);
         }
 
         // Emit cleaned data
         collector.emit(new Values(
                 ts,
                 device,
-                cleanedData.get("co"),
-                cleanedData.get("humidity"),
+                sensorData.get("co"),
+                sensorData.get("humidity"),
                 input.getBooleanByField("light"),
-                cleanedData.get("lpg"),
+                sensorData.get("lpg"),
                 input.getBooleanByField("motion"),
-                cleanedData.get("smoke"),
-                cleanedData.get("temp"),
-                input.getBooleanByField("rejected")
+                sensorData.get("smoke"),
+                sensorData.get("temp"),
+                input.getBooleanByField("rejected"),
+                suspicious
         ));
         collector.ack(input);
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected"));
+        declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected", "suspicious"));
     }
 }
