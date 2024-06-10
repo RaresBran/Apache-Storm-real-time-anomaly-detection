@@ -51,16 +51,16 @@ public class AlertBolt extends BaseRichBolt {
         boolean isSuspicious = tuple.getBooleanByField("isSuspicious");
         double value = tuple.getDoubleByField("value");
 
-        sendAlert(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
+        sendEmailAlert(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
         saveAlertToInfluxDB(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
     }
 
-    private void sendAlert(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
+    private void sendEmailAlert(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
         String formattedTimestamp = formatTimestamp(timestamp);
         String message = String.format("%s event for %s on device %s%nTimestamp: %s%nValue: %.2f%nSuspicious: %b",
                 eventType, sensorType, deviceId, formattedTimestamp, value, isSuspicious);
 
-        alertService.sendAlert(sensorType + " " + eventType + " Alert", message);
+        alertService.sendEmailAlert(sensorType + " " + eventType + " Alert", message);
         log.info("Email alert sent for device {}: {}", deviceId, message);
     }
 

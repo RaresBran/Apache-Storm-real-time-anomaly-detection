@@ -21,9 +21,9 @@ public class KafkaSpoutConfigBuilder {
                 .setProp(ConsumerConfig.GROUP_ID_CONFIG, "storm-consumer-group")
                 .setProp(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName())
                 .setProp(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName())
-                .setProp(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+                .setProp(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
                 .setRetry(retryService)
-                .setFirstPollOffsetStrategy(FirstPollOffsetStrategy.EARLIEST)
+                .setFirstPollOffsetStrategy(FirstPollOffsetStrategy.UNCOMMITTED_LATEST)
                 .build();
     }
 }

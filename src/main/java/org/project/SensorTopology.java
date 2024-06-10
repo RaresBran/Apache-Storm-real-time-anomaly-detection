@@ -8,15 +8,11 @@ import org.apache.storm.kafka.spout.KafkaSpoutConfig;
 import org.apache.storm.topology.ConfigurableTopology;
 import org.apache.storm.topology.TopologyBuilder;
 import org.apache.storm.utils.Utils;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.project.bolt.*;
 import org.project.bolt.cleaning.*;
 import org.project.spout.KafkaSpoutConfigBuilder;
-
-import java.util.HashMap;
-import java.util.Map;
 
 public class SensorTopology extends ConfigurableTopology {
     private static final Logger log = LoggerFactory.getLogger(SensorTopology.class);
@@ -28,22 +24,25 @@ public class SensorTopology extends ConfigurableTopology {
 
     @Override
     protected int run(String[] args) throws Exception {
-        if (args.length < 5) {
+        if (args.length < 6) {
             throw new IllegalArgumentException("Usage: " +
                     "SensorTopology " +
                     "<kafka-broker-url> " +
                     "<influxdb-url> " +
+                    "<redis-url>" +
                     "<influxdb-bucket> " +
                     "<influxdb-organization> " +
-                    "<influxdb-token>"
+                    "<influxdb-token> "
             );
         }
 
         String kafkaBrokerUrl = args[0];
         String influxdbUrl = args[1];
-        String influxdbBucket = args[2];
-        String influxdbOrganization = args[3];
-        String influxdbToken = args[4];
+        String redisUrl = args[2];
+        String influxdbBucket = args[3];
+        String influxdbOrganization = args[4];
+        String influxdbToken = args[5];
+
         String[] devices = {"b8:27:eb:bf:9d:51", "00:0f:00:70:91:0a", "1c:bf:ce:15:ec:4d"};
         String[] topics = {"sensor1-data", "sensor2-data", "sensor3-data"};
 
@@ -70,17 +69,24 @@ public class SensorTopology extends ConfigurableTopology {
             // Alert detection bolts
             builder.setBolt("value-blocked-bolt-" + deviceId, new ValueBlockedBolt(12 * 60 * 60 * 1000L))
                     .shuffleGrouping("false-spikes-bolt-" + deviceId);
-            builder.setBolt("threshold-bolt-" + deviceId, new ThresholdBolt(getThresholdsMap()))
+
+            // Parse Redis URL
+            String[] redisParts = redisUrl.split(":");
+            String redisHost = redisParts[0];
+            int redisPort = Integer.parseInt(redisParts[1]);
+            builder.setBolt("threshold-bolt-" + deviceId, new ThresholdBolt(redisHost, redisPort))
                     .shuffleGrouping("value-blocked-bolt-" + deviceId);
 
             // Save to database bolt
             builder.setBolt("print-bolt-" + deviceId, tuple -> log.info(tuple.toString()))
                     .shuffleGrouping("value-blocked-bolt-" + deviceId);
-            builder.setBolt("influxdb-bolt-" + deviceId, new InfluxDBBolt(influxdbUrl, influxdbBucket, influxdbOrganization, influxdbToken))
+            builder.setBolt("influxdb-bolt-" + deviceId,
+                            new InfluxDBBolt(influxdbUrl, influxdbBucket, influxdbOrganization, influxdbToken))
                     .shuffleGrouping("value-blocked-bolt-" + deviceId);
 
             // Alert emitting bolt
-            builder.setBolt("alert-bolt-" + deviceId, new AlertBolt(influxdbUrl, influxdbBucket, influxdbOrganization, influxdbToken))
+            builder.setBolt("alert-bolt-" + deviceId,
+                            new AlertBolt(influxdbUrl, influxdbBucket, influxdbOrganization, influxdbToken))
                     .shuffleGrouping("threshold-bolt-" + deviceId, ALERT_STREAM)
                     .shuffleGrouping("value-blocked-bolt-" + deviceId, ALERT_STREAM);
         }
@@ -102,20 +108,5 @@ public class SensorTopology extends ConfigurableTopology {
         Utils.sleep(1000000);
         cluster.shutdown();
         return 0;
-    }
-
-    private static @NotNull Map<String, Double> getThresholdsMap() {
-        Map<String, Double> thresholdsMap = new HashMap<>();
-        thresholdsMap.put("coLow", 0.0);
-        thresholdsMap.put("coHigh", 10.0);
-        thresholdsMap.put("humidityLow", 0.0);
-        thresholdsMap.put("humidityHigh", 100.0);
-        thresholdsMap.put("lpgLow", 0.0);
-        thresholdsMap.put("lpgHigh", 1000.0);
-        thresholdsMap.put("smokeLow", 0.0);
-        thresholdsMap.put("smokeHigh", 5.0);
-        thresholdsMap.put("tempLow", -40.0);
-        thresholdsMap.put("tempHigh", 25.0);
-        return thresholdsMap;
     }
 }

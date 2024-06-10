@@ -7,50 +7,63 @@ import org.apache.storm.topology.base.BaseRichBolt;
 import org.apache.storm.tuple.Fields;
 import org.apache.storm.tuple.Tuple;
 import org.apache.storm.tuple.Values;
-import org.project.bolt.utility.Thresholds;
+import org.project.utility.Thresholds;
+import org.project.service.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class ThresholdBolt extends BaseRichBolt {
     private static final Logger log = LoggerFactory.getLogger(ThresholdBolt.class);
     private transient OutputCollector outputCollector;
+    private Map<String, SensorWindow> sensorWindows;
+    private transient RedisService redisService;
+    private final String redisHost;
+    private final int redisPort;
     private transient Thresholds thresholds;
 
     private static class SensorWindow implements Serializable {
         boolean thresholdExceeded;
         long anomalyStart;
+
     }
 
-    private Map<String, SensorWindow> sensorWindows;
-    private final Map<String, Double> thresholdMap;
-
-    public ThresholdBolt(Map<String, Double> thresholdMap) {
-        this.thresholdMap = thresholdMap;
+    public ThresholdBolt(String redisHost, int redisPort) {
+        this.redisHost = redisHost;
+        this.redisPort = redisPort;
     }
 
     @Override
     public void prepare(Map<String, Object> map, TopologyContext topologyContext, OutputCollector outputCollector) {
         this.outputCollector = outputCollector;
-
-        thresholds = new Thresholds(
-                thresholdMap.get("coLow"), thresholdMap.get("coHigh"),
-                thresholdMap.get("humidityLow"), thresholdMap.get("humidityHigh"),
-                thresholdMap.get("lpgLow"), thresholdMap.get("lpgHigh"),
-                thresholdMap.get("smokeLow"), thresholdMap.get("smokeHigh"),
-                thresholdMap.get("tempLow"), thresholdMap.get("tempHigh")
-        );
+        this.redisService = new RedisService(redisHost, redisPort);
 
         sensorWindows = new HashMap<>();
         sensorWindows.put("co", new SensorWindow());
         sensorWindows.put("humidity", new SensorWindow());
-        sensorWindows.put("light", new SensorWindow());
         sensorWindows.put("lpg", new SensorWindow());
         sensorWindows.put("smoke", new SensorWindow());
         sensorWindows.put("temp", new SensorWindow());
+
+        fetchThresholds();
+
+        Timer timer = new Timer();
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                fetchThresholds();
+                log.info("Fetched thresholds {}", thresholds);
+            }
+        }, 0, 10000); // Fetch thresholds every 10 seconds
+    }
+
+    private void fetchThresholds() {
+        thresholds = redisService.getThresholds("Thresholds:default");
     }
 
     @Override
@@ -61,17 +74,15 @@ public class ThresholdBolt extends BaseRichBolt {
         String deviceId = tuple.getStringByField("device");
         double co = tuple.getDoubleByField("co");
         double humidity = tuple.getDoubleByField("humidity");
-        boolean light = tuple.getBooleanByField("light");
         double lpg = tuple.getDoubleByField("lpg");
         double smoke = tuple.getDoubleByField("smoke");
         double temp = tuple.getDoubleByField("temp");
 
-        checkThresholdsAndSendAlert("co", deviceId, ts, co, thresholds.coLow(), thresholds.coHigh());
-        checkThresholdsAndSendAlert("humidity", deviceId, ts, humidity, thresholds.humidityLow(), thresholds.humidityHigh());
-        checkThresholdsAndSendAlert("light", deviceId, ts, light ? 1.0 : 0.0, thresholds.lpgLow(), thresholds.lpgHigh());
-        checkThresholdsAndSendAlert("lpg", deviceId, ts, lpg, thresholds.lpgLow(), thresholds.lpgHigh());
-        checkThresholdsAndSendAlert("smoke", deviceId, ts, smoke, thresholds.smokeLow(), thresholds.smokeHigh());
-        checkThresholdsAndSendAlert("temp", deviceId, ts, temp, thresholds.tempLow(), thresholds.tempHigh());
+        checkThresholdsAndSendAlert("co", deviceId, ts, co, thresholds.coLower(), thresholds.coUpper());
+        checkThresholdsAndSendAlert("humidity", deviceId, ts, humidity, thresholds.humidityLower(), thresholds.humidityUpper());
+        checkThresholdsAndSendAlert("lpg", deviceId, ts, lpg, thresholds.lpgLower(), thresholds.lpgUpper());
+        checkThresholdsAndSendAlert("smoke", deviceId, ts, smoke, thresholds.smokeLower(), thresholds.smokeUpper());
+        checkThresholdsAndSendAlert("temp", deviceId, ts, temp, thresholds.temperatureLower(), thresholds.temperatureUpper());
     }
 
     private boolean handleRejectedTuple(Tuple tuple) {

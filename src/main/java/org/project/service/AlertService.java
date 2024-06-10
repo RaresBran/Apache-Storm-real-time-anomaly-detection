@@ -20,7 +20,7 @@ public class AlertService {
                 .buildMailer();
     }
 
-    public void sendAlert(String subject, String message) {
+    public void sendEmailAlert(String subject, String message) {
         Email email = EmailBuilder.startingBlank()
                 .from("Sensor Alerts", "sensor@alert.com")
                 .to("Admin", "admin@example.com")
@@ -29,6 +29,6 @@ public class AlertService {
                 .buildEmail();
 
         log.info("Sending email alert: {}", subject);
-        mailer.sendMail(email);
+//        mailer.sendMail(email);
     }
 }
