@@ -1,18 +1,19 @@
 package org.project.bolt;
 
-import com.influxdb.client.domain.WritePrecision;
 import org.apache.storm.task.OutputCollector;
 import org.apache.storm.task.TopologyContext;
 import org.apache.storm.topology.OutputFieldsDeclarer;
 import org.apache.storm.topology.base.BaseRichBolt;
 import org.apache.storm.tuple.Tuple;
 import org.project.service.AlertService;
-import org.project.service.InfluxDBService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.influxdb.client.write.Point;
-
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -22,24 +23,26 @@ import java.util.Map;
 public class AlertBolt extends BaseRichBolt {
     private static final Logger log = LoggerFactory.getLogger(AlertBolt.class);
     private transient AlertService alertService;
-    private transient InfluxDBService influxDBService;
+    private transient Connection connection;
 
-    private final String influxDbUrl;
-    private final String bucket;
-    private final String org;
-    private final String token;
+    private final String jdbcUrl;
+    private final String user;
+    private final String password;
 
-    public AlertBolt(String influxDbUrl, String bucket, String org, String token) {
-        this.influxDbUrl = influxDbUrl;
-        this.bucket = bucket;
-        this.org = org;
-        this.token = token;
+    public AlertBolt(String jdbcUrl, String user, String password) {
+        this.jdbcUrl = jdbcUrl;
+        this.user = user;
+        this.password = password;
     }
 
     @Override
     public void prepare(Map<String, Object> map, TopologyContext topologyContext, OutputCollector outputCollector) {
         this.alertService = new AlertService();
-        this.influxDBService = new InfluxDBService(influxDbUrl, bucket, org, token);
+        try {
+            this.connection = DriverManager.getConnection(jdbcUrl, user, password);
+        } catch (SQLException e) {
+            throw new RuntimeException("Error initializing database connection", e);
+        }
     }
 
     @Override
@@ -52,7 +55,7 @@ public class AlertBolt extends BaseRichBolt {
         double value = tuple.getDoubleByField("value");
 
         sendEmailAlert(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
-        saveAlertToInfluxDB(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
+        saveAlertToTimescaleDB(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
     }
 
     private void sendEmailAlert(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
@@ -64,17 +67,20 @@ public class AlertBolt extends BaseRichBolt {
         log.info("Email alert sent for device {}: {}", deviceId, message);
     }
 
-    private void saveAlertToInfluxDB(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
-        Point point = Point
-                .measurement("event_alerts")
-                .addTag("device", deviceId)
-                .addField("eventType", eventType)
-                .addField("sensorType", sensorType)
-                .addField("value", value)
-                .addField("suspicious", isSuspicious)
-                .time(timestamp, WritePrecision.MS);
+    private void saveAlertToTimescaleDB(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
+        String sql = "INSERT INTO event_alerts (time, device, event_type, sensor_type, value, suspicious) VALUES (?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, new Timestamp(timestamp));
+            statement.setString(2, deviceId);
+            statement.setString(3, eventType);
+            statement.setString(4, sensorType);
+            statement.setDouble(5, value);
+            statement.setBoolean(6, isSuspicious);
 
-        influxDBService.writePoint(point);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Error executing SQL statement", e);
+        }
     }
 
     private String formatTimestamp(long timestamp) {
@@ -84,8 +90,12 @@ public class AlertBolt extends BaseRichBolt {
 
     @Override
     public void cleanup() {
-        if (influxDBService != null) {
-            influxDBService.close();
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (SQLException e) {
+                // Log and handle the error properly
+            }
         }
     }
 

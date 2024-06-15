@@ -57,7 +57,6 @@ public class ThresholdBolt extends BaseRichBolt {
             @Override
             public void run() {
                 fetchThresholds();
-                log.info("Fetched thresholds {}", thresholds);
             }
         }, 0, 10000); // Fetch thresholds every 10 seconds
     }

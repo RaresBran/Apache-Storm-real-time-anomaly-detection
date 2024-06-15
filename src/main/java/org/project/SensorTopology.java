@@ -2,7 +2,6 @@ package org.project;
 
 import org.apache.storm.Config;
 import org.apache.storm.LocalCluster;
-import org.apache.storm.StormSubmitter;
 import org.apache.storm.kafka.spout.KafkaSpout;
 import org.apache.storm.kafka.spout.KafkaSpoutConfig;
 import org.apache.storm.topology.ConfigurableTopology;
@@ -24,24 +23,22 @@ public class SensorTopology extends ConfigurableTopology {
 
     @Override
     protected int run(String[] args) throws Exception {
-        if (args.length < 6) {
+        if (args.length < 5) {
             throw new IllegalArgumentException("Usage: " +
                     "SensorTopology " +
                     "<kafka-broker-url> " +
-                    "<influxdb-url> " +
-                    "<redis-url>" +
-                    "<influxdb-bucket> " +
-                    "<influxdb-organization> " +
-                    "<influxdb-token> "
+                    "<redis-url> " +
+                    "<timescale-url> " +
+                    "<timescale-username> " +
+                    "<timescale-password> "
             );
         }
 
         String kafkaBrokerUrl = args[0];
-        String influxdbUrl = args[1];
-        String redisUrl = args[2];
-        String influxdbBucket = args[3];
-        String influxdbOrganization = args[4];
-        String influxdbToken = args[5];
+        String redisUrl = args[1];
+        String timescaleUrl = args[2];
+        String timescaleUser = args[3];
+        String timescalePass = args[4];
 
         String[] devices = {"b8:27:eb:bf:9d:51", "00:0f:00:70:91:0a", "1c:bf:ce:15:ec:4d"};
         String[] topics = {"sensor1-data", "sensor2-data", "sensor3-data"};
@@ -80,13 +77,13 @@ public class SensorTopology extends ConfigurableTopology {
             // Save to database bolt
             builder.setBolt("print-bolt-" + deviceId, tuple -> log.info(tuple.toString()))
                     .shuffleGrouping("value-blocked-bolt-" + deviceId);
-            builder.setBolt("influxdb-bolt-" + deviceId,
-                            new InfluxDBBolt(influxdbUrl, influxdbBucket, influxdbOrganization, influxdbToken))
+
+            builder.setBolt("timescaledb-bolt-" + deviceId,
+                            new TimescaleDBBolt(timescaleUrl, timescaleUser, timescalePass))
                     .shuffleGrouping("value-blocked-bolt-" + deviceId);
 
-            // Alert emitting bolt
             builder.setBolt("alert-bolt-" + deviceId,
-                            new AlertBolt(influxdbUrl, influxdbBucket, influxdbOrganization, influxdbToken))
+                            new AlertBolt(timescaleUrl, timescaleUser, timescalePass))
                     .shuffleGrouping("threshold-bolt-" + deviceId, ALERT_STREAM)
                     .shuffleGrouping("value-blocked-bolt-" + deviceId, ALERT_STREAM);
         }
