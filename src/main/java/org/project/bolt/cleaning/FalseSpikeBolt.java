@@ -27,8 +27,9 @@ public class FalseSpikeBolt extends BaseRichBolt {
 
     @Override
     public void execute(Tuple input) {
-        boolean isRejected = input.getBooleanByField("rejected");
-        if (isRejected) {
+        boolean rejected = input.getBooleanByField("rejected");
+        boolean suspicious = input.getBooleanByField("suspicious");
+        if (rejected || suspicious) {
             // Emit the tuple as-is if it's rejected
             collector.emit(input.getValues());
             collector.ack(input);
@@ -44,8 +45,6 @@ public class FalseSpikeBolt extends BaseRichBolt {
         sensorData.put("lpg", input.getDoubleByField("lpg"));
         sensorData.put("smoke", input.getDoubleByField("smoke"));
         sensorData.put("temp", input.getDoubleByField("temp"));
-
-        boolean suspicious = false;
 
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
             String sensor = entry.getKey();
@@ -68,6 +67,7 @@ public class FalseSpikeBolt extends BaseRichBolt {
             final double threshold = 3.0;
             if (Math.abs(value - mean) > threshold) {
                 log.warn("Detected false spike in sensor {} on device {}: {}", sensor, device, value);
+                window.removeLast();
                 suspicious = true; // Mark as suspicious
             }
         }

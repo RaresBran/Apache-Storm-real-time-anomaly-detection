@@ -8,7 +8,7 @@ import org.apache.storm.tuple.Fields;
 import org.apache.storm.tuple.Tuple;
 import org.apache.storm.tuple.Values;
 import org.project.utility.Thresholds;
-import org.project.service.RedisService;
+import org.project.handler.RedisHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,10 +22,10 @@ public class ThresholdBolt extends BaseRichBolt {
     private static final Logger log = LoggerFactory.getLogger(ThresholdBolt.class);
     private transient OutputCollector outputCollector;
     private Map<String, SensorWindow> sensorWindows;
-    private transient RedisService redisService;
+    private RedisHandler redisHandler;
     private final String redisHost;
     private final int redisPort;
-    private transient Thresholds thresholds;
+    private Thresholds thresholds;
 
     private static class SensorWindow implements Serializable {
         boolean thresholdExceeded;
@@ -41,7 +41,7 @@ public class ThresholdBolt extends BaseRichBolt {
     @Override
     public void prepare(Map<String, Object> map, TopologyContext topologyContext, OutputCollector outputCollector) {
         this.outputCollector = outputCollector;
-        this.redisService = new RedisService(redisHost, redisPort);
+        this.redisHandler = new RedisHandler(redisHost, redisPort);
 
         sensorWindows = new HashMap<>();
         sensorWindows.put("co", new SensorWindow());
@@ -62,7 +62,7 @@ public class ThresholdBolt extends BaseRichBolt {
     }
 
     private void fetchThresholds() {
-        thresholds = redisService.getThresholds("Thresholds:default");
+        thresholds = redisHandler.getThresholds("Thresholds:default");
     }
 
     @Override
@@ -112,6 +112,6 @@ public class ThresholdBolt extends BaseRichBolt {
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
-        declarer.declareStream("alertStream", new Fields("deviceId", "eventType", "sensorType", "timestamp", "isSuspicious", "value"));
+        declarer.declareStream("alertStream", new Fields("deviceId", "eventType", "sensorType", "timestamp", "suspicious", "value"));
     }
 }

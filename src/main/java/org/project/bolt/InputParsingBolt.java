@@ -13,9 +13,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
-public class JsonParsingBolt extends BaseRichBolt {
+public class InputParsingBolt extends BaseRichBolt {
     private OutputCollector collector;
-    private static final Logger log = LoggerFactory.getLogger(JsonParsingBolt.class);
+    private static final Logger log = LoggerFactory.getLogger(InputParsingBolt.class);
 
     @Override
     public void prepare(Map stormConf, TopologyContext context, OutputCollector collector) {

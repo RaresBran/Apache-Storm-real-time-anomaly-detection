@@ -6,16 +6,21 @@ import org.apache.storm.kafka.spout.KafkaSpout;
 import org.apache.storm.kafka.spout.KafkaSpoutConfig;
 import org.apache.storm.topology.ConfigurableTopology;
 import org.apache.storm.topology.TopologyBuilder;
+import org.apache.storm.topology.base.BaseWindowedBolt;
+import org.apache.storm.tuple.Fields;
 import org.apache.storm.utils.Utils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.project.bolt.*;
 import org.project.bolt.cleaning.*;
 import org.project.spout.KafkaSpoutConfigBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SensorTopology extends ConfigurableTopology {
+    private static final String ALERT_STREAM = "alertStream";
+    private static final String DEVICE_ID_FIELD = "device";
+    private static final String[] DEVICES = {"b8:27:eb:bf:9d:51", "00:0f:00:70:91:0a", "1c:bf:ce:15:ec:4d"};
+    private static final String[] TOPICS = {"sensor1-data", "sensor2-data", "sensor3-data"};
     private static final Logger log = LoggerFactory.getLogger(SensorTopology.class);
-    public static final String ALERT_STREAM = "alertStream";
 
     public static void main(String[] args) {
         ConfigurableTopology.start(new SensorTopology(), args);
@@ -40,53 +45,54 @@ public class SensorTopology extends ConfigurableTopology {
         String timescaleUser = args[3];
         String timescalePass = args[4];
 
-        String[] devices = {"b8:27:eb:bf:9d:51", "00:0f:00:70:91:0a", "1c:bf:ce:15:ec:4d"};
-        String[] topics = {"sensor1-data", "sensor2-data", "sensor3-data"};
+        // Parse Redis URL
+        String[] redisParts = redisUrl.split(":");
+        String redisHost = redisParts[0];
+        int redisPort = Integer.parseInt(redisParts[1]);
 
         TopologyBuilder builder = new TopologyBuilder();
 
-        for (int i = 0; i < devices.length; i++) {
-            String deviceId = devices[i];
-            String topic = topics[i];
+        for (int i = 0; i < DEVICES.length; i++) {
+            String deviceId = DEVICES[i];
+            String topic = TOPICS[i];
 
             // Data spouts and emitting
             KafkaSpoutConfig<String, String> kafkaSpoutConfig = KafkaSpoutConfigBuilder.createKafkaSpoutConfig(kafkaBrokerUrl, topic);
             builder.setSpout("kafka-spout-" + deviceId, new KafkaSpout<>(kafkaSpoutConfig));
-            builder.setBolt("json-parsing-bolt-" + deviceId, new JsonParsingBolt())
-                    .shuffleGrouping("kafka-spout-" + deviceId);
-
-            // Data cleaning
-            builder.setBolt("bad-timestamps-bolt-" + deviceId, new BadTimestampBolt())
-                    .shuffleGrouping("json-parsing-bolt-" + deviceId);
-            builder.setBolt("data-outliers-bolt-" + deviceId, new DataOutlierBolt())
-                    .shuffleGrouping("bad-timestamps-bolt-" + deviceId);
-            builder.setBolt("false-spikes-bolt-" + deviceId, new FalseSpikeBolt())
-                    .shuffleGrouping("data-outliers-bolt-" + deviceId);
-
-            // Alert detection bolts
-            builder.setBolt("value-blocked-bolt-" + deviceId, new ValueBlockedBolt(12 * 60 * 60 * 1000L))
-                    .shuffleGrouping("false-spikes-bolt-" + deviceId);
-
-            // Parse Redis URL
-            String[] redisParts = redisUrl.split(":");
-            String redisHost = redisParts[0];
-            int redisPort = Integer.parseInt(redisParts[1]);
-            builder.setBolt("threshold-bolt-" + deviceId, new ThresholdBolt(redisHost, redisPort))
-                    .shuffleGrouping("value-blocked-bolt-" + deviceId);
-
-            // Save to database bolt
-            builder.setBolt("print-bolt-" + deviceId, tuple -> log.info(tuple.toString()))
-                    .shuffleGrouping("value-blocked-bolt-" + deviceId);
-
-            builder.setBolt("timescaledb-bolt-" + deviceId,
-                            new TimescaleDBBolt(timescaleUrl, timescaleUser, timescalePass))
-                    .shuffleGrouping("value-blocked-bolt-" + deviceId);
-
-            builder.setBolt("alert-bolt-" + deviceId,
-                            new AlertBolt(timescaleUrl, timescaleUser, timescalePass))
-                    .shuffleGrouping("threshold-bolt-" + deviceId, ALERT_STREAM)
-                    .shuffleGrouping("value-blocked-bolt-" + deviceId, ALERT_STREAM);
         }
+
+        builder.setBolt("input-parsing-bolt", new InputParsingBolt(), 3)
+                .shuffleGrouping("kafka-spout-" + DEVICES[0])
+                .shuffleGrouping("kafka-spout-" + DEVICES[1])
+                .shuffleGrouping("kafka-spout-" + DEVICES[2]);
+
+        builder.setBolt("bad-timestamps-bolt",
+                        new BadTimestampBolt()
+                                .withWindow(BaseWindowedBolt.Count.of(3), BaseWindowedBolt.Count.of(1)), 3)
+                .fieldsGrouping("input-parsing-bolt", new Fields(DEVICE_ID_FIELD));
+
+        builder.setBolt("data-outliers-bolt", new DataOutlierBolt(), 3)
+                .fieldsGrouping("bad-timestamps-bolt", new Fields(DEVICE_ID_FIELD));
+
+        builder.setBolt("false-spikes-bolt", new FalseSpikeBolt(), 3)
+                .fieldsGrouping("data-outliers-bolt", new Fields(DEVICE_ID_FIELD));
+
+        builder.setBolt("value-blocked-bolt", new ValueBlockedBolt(12 * 60 * 60 * 1000L), 3)
+                .fieldsGrouping("false-spikes-bolt", new Fields(DEVICE_ID_FIELD));
+
+        builder.setBolt("threshold-bolt", new ThresholdBolt(redisHost, redisPort), 3)
+                .fieldsGrouping("value-blocked-bolt", new Fields(DEVICE_ID_FIELD));
+
+        builder.setBolt("print-bolt", tuple -> log.info(tuple.toString()))
+                .shuffleGrouping("value-blocked-bolt");
+
+        builder.setBolt("timescaledb-bolt",
+                        new TimescaleDBBolt(timescaleUrl, timescaleUser, timescalePass), 3)
+                .fieldsGrouping("value-blocked-bolt", new Fields(DEVICE_ID_FIELD));
+
+        builder.setBolt("alert-bolt",
+                        new AlertBolt(timescaleUrl, timescaleUser, timescalePass, redisHost, redisPort))
+                .shuffleGrouping("threshold-bolt", ALERT_STREAM);
 
 //        Config conf = new Config();
 //        conf.setDebug(false);
@@ -98,8 +104,8 @@ public class SensorTopology extends ConfigurableTopology {
         Config conf = new Config();
         conf.setDebug(false);
         conf.setNumWorkers(2);
-
         conf.setMaxTaskParallelism(3);
+
         LocalCluster cluster = new LocalCluster();
         cluster.submitTopology("sensor-topology", conf, builder.createTopology());
         Utils.sleep(1000000);

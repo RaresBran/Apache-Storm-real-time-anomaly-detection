@@ -25,7 +25,6 @@ public class ValueBlockedBolt extends BaseRichBolt {
         double value;
         long startTime;
         LinkedList<Double> window;
-        boolean alertSent;
     }
 
     private Map<String, Map<String, SensorData>> deviceSensorData;
@@ -47,11 +46,14 @@ public class ValueBlockedBolt extends BaseRichBolt {
 
         long ts = input.getLongByField("ts");
         String device = input.getStringByField("device");
+        boolean suspicious = input.getBooleanByField("suspicious");
 
         Map<String, Double> sensorData = extractSensorData(input);
-        boolean rejected = processSensorData(ts, device, sensorData);
+        if (!suspicious) {
+            suspicious = processSensorData(ts, device, sensorData);
+        }
 
-        emitData(input, ts, device, sensorData, rejected);
+        emitData(input, ts, device, sensorData, suspicious);
         collector.ack(input);
     }
 
@@ -76,7 +78,7 @@ public class ValueBlockedBolt extends BaseRichBolt {
     }
 
     private boolean processSensorData(long ts, String device, Map<String, Double> sensorData) {
-        boolean rejected = false;
+        boolean suspicious = false;
 
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
             String sensor = entry.getKey();
@@ -86,11 +88,7 @@ public class ValueBlockedBolt extends BaseRichBolt {
             SensorData data = sensorMap.computeIfAbsent(sensor, k -> new SensorData());
 
             if (isDataBlocked(ts, data, value)) {
-                rejected = true;
-                if (!data.alertSent) {
-                    emitBlockedAlert(sensor, device, ts, value);
-                    data.alertSent = true;
-                }
+                suspicious = true;
             } else {
                 resetSensorData(data, value, ts);
             }
@@ -98,7 +96,7 @@ public class ValueBlockedBolt extends BaseRichBolt {
             maintainSlidingWindow(data, value);
         }
 
-        return rejected;
+        return suspicious;
     }
 
     private boolean isDataBlocked(long ts, SensorData data, double value) {
@@ -108,7 +106,6 @@ public class ValueBlockedBolt extends BaseRichBolt {
     private void resetSensorData(SensorData data, double value, long ts) {
         data.value = value;
         data.startTime = ts;
-        data.alertSent = false;
     }
 
     private void maintainSlidingWindow(SensorData data, double value) {
@@ -121,12 +118,7 @@ public class ValueBlockedBolt extends BaseRichBolt {
         data.window.addLast(value);
     }
 
-    private void emitBlockedAlert(String sensor, String device, long timestamp, double value) {
-        collector.emit("alertStream", new Values(device, "value_blocked", sensor, timestamp, false, value));
-        log.info("Emitting value blocked alert for sensor {} of device {}: {}", sensor, device, timestamp);
-    }
-
-    private void emitData(Tuple input, long ts, String device, Map<String, Double> sensorData, boolean rejected) {
+    private void emitData(Tuple input, long ts, String device, Map<String, Double> sensorData, boolean suspicious) {
         collector.emit(new Values(
                 ts,
                 device,
@@ -137,14 +129,13 @@ public class ValueBlockedBolt extends BaseRichBolt {
                 input.getBooleanByField("motion"),
                 sensorData.get("smoke"),
                 sensorData.get("temp"),
-                rejected,
-                input.getBooleanByField("suspicious")
+                input.getBooleanByField("rejected"),
+                suspicious
         ));
     }
 
     @Override
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
         declarer.declare(new Fields("ts", "device", "co", "humidity", "light", "lpg", "motion", "smoke", "temp", "rejected", "suspicious"));
-        declarer.declareStream("alertStream", new Fields("deviceId", "eventType", "sensorType", "timestamp", "isSuspicious", "value"));
     }
 }

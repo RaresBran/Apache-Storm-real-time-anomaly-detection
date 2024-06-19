@@ -16,7 +16,7 @@ import java.util.Map;
 
 public class DataOutlierBolt extends BaseRichBolt {
     private static final Logger log = LoggerFactory.getLogger(DataOutlierBolt.class);
-    private OutputCollector collector;
+    private transient OutputCollector collector;
 
     // Realistic bounds for each measurement
     private static final double CO_LOWER_BOUND = 0.0; // CO ppm lower bound
