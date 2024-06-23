@@ -42,6 +42,7 @@ public class InputParsingBolt extends BaseRichBolt {
 
             collector.emit(new Values(ts, device, co, humidity, light, lpg, motion, smoke, temp, rejected, suspicious));
         } catch (Exception e) {
+            collector.fail(input);
             log.error("Error parsing JSON message: {}", message, e);
         } finally {
             collector.ack(input);

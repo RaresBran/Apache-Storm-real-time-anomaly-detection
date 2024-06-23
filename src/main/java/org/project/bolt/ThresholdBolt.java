@@ -76,37 +76,38 @@ public class ThresholdBolt extends BaseRichBolt {
         double lpg = tuple.getDoubleByField("lpg");
         double smoke = tuple.getDoubleByField("smoke");
         double temp = tuple.getDoubleByField("temp");
+        boolean suspicious = tuple.getBooleanByField("suspicious");
 
-        checkThresholdsAndSendAlert("co", deviceId, ts, co, thresholds.coLower(), thresholds.coUpper());
-        checkThresholdsAndSendAlert("humidity", deviceId, ts, humidity, thresholds.humidityLower(), thresholds.humidityUpper());
-        checkThresholdsAndSendAlert("lpg", deviceId, ts, lpg, thresholds.lpgLower(), thresholds.lpgUpper());
-        checkThresholdsAndSendAlert("smoke", deviceId, ts, smoke, thresholds.smokeLower(), thresholds.smokeUpper());
-        checkThresholdsAndSendAlert("temp", deviceId, ts, temp, thresholds.temperatureLower(), thresholds.temperatureUpper());
+        checkThresholdsAndSendAlert("co", deviceId, ts, co, thresholds.coLower(), thresholds.coUpper(), suspicious);
+        checkThresholdsAndSendAlert("humidity", deviceId, ts, humidity, thresholds.humidityLower(), thresholds.humidityUpper(),suspicious);
+        checkThresholdsAndSendAlert("lpg", deviceId, ts, lpg, thresholds.lpgLower(), thresholds.lpgUpper(), suspicious);
+        checkThresholdsAndSendAlert("smoke", deviceId, ts, smoke, thresholds.smokeLower(), thresholds.smokeUpper(), suspicious);
+        checkThresholdsAndSendAlert("temp", deviceId, ts, temp, thresholds.temperatureLower(), thresholds.temperatureUpper(), suspicious);
+
+        outputCollector.ack(tuple);
     }
 
     private boolean handleRejectedTuple(Tuple tuple) {
         return tuple.getBooleanByField("rejected");
     }
 
-    private void checkThresholdsAndSendAlert(String sensorName, String deviceId, long ts, double value, double low, double high) {
+    private void checkThresholdsAndSendAlert(String sensorName, String deviceId, long ts, double value, double low, double high, boolean suspicious) {
         SensorWindow window = sensorWindows.get(sensorName);
 
         if (value < low || value > high) {
             if (!window.thresholdExceeded) {
                 window.thresholdExceeded = true;
                 window.anomalyStart = ts;
-                emitAlert(sensorName, deviceId, ts, value, "anomaly_start");
+                emitAlert(sensorName, deviceId, ts, value, suspicious, "anomaly_start");
             }
-        } else {
-            if (window.thresholdExceeded) {
+        } else if (window.thresholdExceeded) {
                 window.thresholdExceeded = false;
-                emitAlert(sensorName, deviceId, ts, value, "anomaly_end");
-            }
+                emitAlert(sensorName, deviceId, ts, value, suspicious, "anomaly_end");
         }
     }
 
-    private void emitAlert(String sensorName, String deviceId, long ts, double value, String eventType) {
-        outputCollector.emit("alertStream", new Values(deviceId, eventType, sensorName, ts, false, value));
+    private void emitAlert(String sensorName, String deviceId, long ts, double value, boolean suspicious, String eventType) {
+        outputCollector.emit("alertStream", new Values(deviceId, eventType, sensorName, ts, suspicious, value));
         log.info("Emitting {} alert for sensor {} of device {}: {}", eventType, sensorName, deviceId, ts);
     }
 

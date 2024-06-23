@@ -1,14 +1,12 @@
 package org.project;
 
 import org.apache.storm.Config;
-import org.apache.storm.LocalCluster;
+import org.apache.storm.StormSubmitter;
 import org.apache.storm.kafka.spout.KafkaSpout;
 import org.apache.storm.kafka.spout.KafkaSpoutConfig;
 import org.apache.storm.topology.ConfigurableTopology;
 import org.apache.storm.topology.TopologyBuilder;
-import org.apache.storm.topology.base.BaseWindowedBolt;
 import org.apache.storm.tuple.Fields;
-import org.apache.storm.utils.Utils;
 import org.project.bolt.*;
 import org.project.bolt.cleaning.*;
 import org.project.spout.KafkaSpoutConfigBuilder;
@@ -35,7 +33,8 @@ public class SensorTopology extends ConfigurableTopology {
                     "<redis-url> " +
                     "<timescale-url> " +
                     "<timescale-username> " +
-                    "<timescale-password> "
+                    "<timescale-password> " +
+                    "<worker-nodes-count>"
             );
         }
 
@@ -44,6 +43,7 @@ public class SensorTopology extends ConfigurableTopology {
         String timescaleUrl = args[2];
         String timescaleUser = args[3];
         String timescalePass = args[4];
+        int workerNodesCount = Integer.parseInt(args[5]);
 
         // Parse Redis URL
         String[] redisParts = redisUrl.split(":");
@@ -66,9 +66,7 @@ public class SensorTopology extends ConfigurableTopology {
                 .shuffleGrouping("kafka-spout-" + DEVICES[1])
                 .shuffleGrouping("kafka-spout-" + DEVICES[2]);
 
-        builder.setBolt("bad-timestamps-bolt",
-                        new BadTimestampBolt()
-                                .withWindow(BaseWindowedBolt.Count.of(3), BaseWindowedBolt.Count.of(1)), 3)
+        builder.setBolt("bad-timestamps-bolt", new BadTimestampBolt(), 3)
                 .fieldsGrouping("input-parsing-bolt", new Fields(DEVICE_ID_FIELD));
 
         builder.setBolt("data-outliers-bolt", new DataOutlierBolt(), 3)
@@ -83,33 +81,34 @@ public class SensorTopology extends ConfigurableTopology {
         builder.setBolt("threshold-bolt", new ThresholdBolt(redisHost, redisPort), 3)
                 .fieldsGrouping("value-blocked-bolt", new Fields(DEVICE_ID_FIELD));
 
-        builder.setBolt("print-bolt", tuple -> log.info(tuple.toString()))
-                .shuffleGrouping("value-blocked-bolt");
-
         builder.setBolt("timescaledb-bolt",
                         new TimescaleDBBolt(timescaleUrl, timescaleUser, timescalePass), 3)
                 .fieldsGrouping("value-blocked-bolt", new Fields(DEVICE_ID_FIELD));
 
         builder.setBolt("alert-bolt",
-                        new AlertBolt(timescaleUrl, timescaleUser, timescalePass, redisHost, redisPort))
+                        new AlertBolt(timescaleUrl, timescaleUser, timescalePass, redisHost, redisPort), 3)
                 .shuffleGrouping("threshold-bolt", ALERT_STREAM);
 
-//        Config conf = new Config();
-//        conf.setDebug(false);
-//        conf.setNumWorkers(2);  // Set the number of worker processes
-//
-//        StormSubmitter.submitTopology("sensor-topology", conf, builder.createTopology());
-//        return 0;
+
+//        builder.setBolt("print-bolt", tuple -> log.info(tuple.toString()))
+//                .shuffleGrouping("value-blocked-bolt");
 
         Config conf = new Config();
         conf.setDebug(false);
-        conf.setNumWorkers(2);
-        conf.setMaxTaskParallelism(3);
+        conf.setNumWorkers(workerNodesCount);  // Set the number of worker processes
 
-        LocalCluster cluster = new LocalCluster();
-        cluster.submitTopology("sensor-topology", conf, builder.createTopology());
-        Utils.sleep(1000000);
-        cluster.shutdown();
+        StormSubmitter.submitTopology("sensor-topology", conf, builder.createTopology());
         return 0;
+
+//        Config conf = new Config();
+//        conf.setDebug(false);
+//        conf.setNumWorkers(2);
+//        conf.setMaxTaskParallelism(3);
+//
+//        LocalCluster cluster = new LocalCluster();
+//        cluster.submitTopology("sensor-topology", conf, builder.createTopology());
+//        Utils.sleep(1000000);
+//        cluster.shutdown();
+//        return 0;
     }
 }

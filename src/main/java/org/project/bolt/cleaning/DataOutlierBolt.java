@@ -65,11 +65,9 @@ public class DataOutlierBolt extends BaseRichBolt {
             log.warn("Data outlier detected");
         }
 
-        // Adjust the timestamp if necessary
         List<Object> values = new ArrayList<>(input.getValues());
-        values.set(10, rejected);
+        values.set(9, rejected);
 
-        // Emit cleaned data with adjusted timestamp
         collector.emit(new Values(values.toArray()));
         collector.ack(input);
     }

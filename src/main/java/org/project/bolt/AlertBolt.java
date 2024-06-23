@@ -19,6 +19,7 @@ import java.util.Map;
 
 public class AlertBolt extends BaseRichBolt {
     private static final Logger log = LoggerFactory.getLogger(AlertBolt.class);
+    private transient OutputCollector collector;
     private AlertHandler alertHandler;
     private TimescaleDBHandler timescaleDBHandler;
 
@@ -40,6 +41,7 @@ public class AlertBolt extends BaseRichBolt {
     public void prepare(Map<String, Object> map, TopologyContext topologyContext, OutputCollector outputCollector) {
         this.alertHandler = new AlertHandler(new RedisHandler(redisHost, redisPort));
         this.timescaleDBHandler = new TimescaleDBHandler(timescaleUrl, user, password);
+        this.collector = outputCollector;
     }
 
     @Override
@@ -53,18 +55,31 @@ public class AlertBolt extends BaseRichBolt {
 
         timescaleDBHandler.saveAlert(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
         sendEmailAlert(deviceId, eventType, sensorType, timestamp, isSuspicious, value);
+        collector.ack(tuple);
     }
 
     private void sendEmailAlert(String deviceId, String eventType, String sensorType, long timestamp, boolean isSuspicious, double value) {
-        String formattedTimestamp = formatTimestamp(timestamp);
-        String message = String.format("%s event for %s on device %s%nTimestamp: %s%nValue: %.2f%nSuspicious: %b",
+        String formattedTimestamp = getFormattedTimestamp(timestamp);
+        if (eventType.equals("anomaly_start"))
+            eventType = "Anomaly start";
+        else if (eventType.equals("anomaly_end"))
+            eventType = "Anomaly end";
+
+        String message = String.format("""
+                This is an automated message informing you that there has been an `%s` event for sensor `%s` on device `%s`.
+                Timestamp of the event:            %s
+                Value that triggered the event:    %.2f
+                Can be false flag:                 %b
+                
+                Please take action!
+                """,
                 eventType, sensorType, deviceId, formattedTimestamp, value, isSuspicious);
 
         alertHandler.sendEmailAlert(sensorType + " " + eventType + " Alert", message);
         log.info("Email alert sent for device {}: {}", deviceId, message);
     }
 
-    private String formatTimestamp(long timestamp) {
+    private String getFormattedTimestamp(long timestamp) {
         LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault());
         return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }

@@ -8,6 +8,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Instant;
 
 public class TimescaleDBHandler {
     private static final Logger log = LoggerFactory.getLogger(TimescaleDBHandler.class);
@@ -25,7 +26,7 @@ public class TimescaleDBHandler {
     public void saveSensorData(long ts, String device, double temp, double humidity, double co, boolean light, double lpg, boolean motion, double smoke, boolean rejected, boolean suspicious) {
         String sql = "INSERT INTO sensor_data (time, device, temperature, humidity, co, light, lpg, motion, smoke, rejected, suspicious) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setTimestamp(1, new Timestamp(ts));
+            statement.setTimestamp(1, Timestamp.from(Instant.ofEpochMilli(ts)));
             statement.setString(2, device);
             statement.setDouble(3, temp);
             statement.setDouble(4, humidity);
