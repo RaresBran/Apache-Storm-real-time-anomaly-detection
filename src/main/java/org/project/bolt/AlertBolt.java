@@ -87,6 +87,7 @@ public class AlertBolt extends BaseRichBolt {
     @Override
     public void cleanup() {
         timescaleDBHandler.close();
+        alertHandler.shutdown();
     }
 
     @Override

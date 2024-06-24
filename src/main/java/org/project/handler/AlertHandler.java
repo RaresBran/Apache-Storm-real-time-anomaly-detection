@@ -9,24 +9,27 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class AlertHandler {
     private static final Logger log = LoggerFactory.getLogger(AlertHandler.class);
     private final Mailer mailer;
     private final RedisHandler redisHandler;
+    private final ExecutorService executorService;
 
     public AlertHandler(RedisHandler redisHandler) {
         this.mailer = MailerBuilder
-                .withSMTPServer("sandbox.smtp.mailtrap.io", 2525, "d4d2a3a004e61a", "1670639032d692")
-                .withTransportStrategy(TransportStrategy.SMTP_TLS)
+                .withSMTPServer("maildev", 1025)  // MailDev SMTP server
+                .withTransportStrategy(TransportStrategy.SMTP)
                 .withDebugLogging(false)
                 .buildMailer();
         this.redisHandler = redisHandler;
+        this.executorService = Executors.newCachedThreadPool(); // Cached thread pool
     }
 
     public void sendEmailAlert(String subject, String message) {
         List<String> emailList = redisHandler.getAlertEmailList();
-
         Email email = EmailBuilder.startingBlank()
                 .from("Sensor Alerts", "sensor@alert.com")
                 .toMultiple(emailList)
@@ -34,7 +37,14 @@ public class AlertHandler {
                 .withPlainText(message)
                 .buildEmail();
 
-        log.info("Sending email alert to {}: {}", emailList, subject);
-//        mailer.sendMail(email);
+        log.info("Queueing email alert to {}: {}", emailList, subject);
+        executorService.submit(() -> {
+            log.info("Sending email alert to {}: {}", emailList, subject);
+            mailer.sendMail(email);
+        });
+    }
+
+    public void shutdown() {
+        executorService.shutdown();
     }
 }
