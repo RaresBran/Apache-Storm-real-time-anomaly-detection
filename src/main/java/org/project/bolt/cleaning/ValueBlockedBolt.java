@@ -10,7 +10,6 @@ import org.apache.storm.tuple.Values;
 
 import java.io.Serializable;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.Map;
 
 public class ValueBlockedBolt extends BaseRichBolt {
@@ -21,11 +20,14 @@ public class ValueBlockedBolt extends BaseRichBolt {
     private static class SensorData implements Serializable {
         double value;
         long startTime;
-        LinkedList<Double> window;
+
+        SensorData(double value, long startTime) {
+            this.value = value;
+            this.startTime = startTime;
+        }
     }
 
     private Map<String, Map<String, SensorData>> deviceSensorData;
-    private static final int WINDOW_SIZE = 10; // Window size for statistical analysis
 
     public ValueBlockedBolt(long blockDurationMs) {
         this.blockDurationMs = blockDurationMs;
@@ -78,42 +80,23 @@ public class ValueBlockedBolt extends BaseRichBolt {
     private boolean processSensorData(long ts, String device, Map<String, Double> sensorData) {
         boolean suspicious = false;
 
+        Map<String, SensorData> sensorMap = deviceSensorData.computeIfAbsent(device, k -> new HashMap<>());
         for (Map.Entry<String, Double> entry : sensorData.entrySet()) {
             String sensor = entry.getKey();
             double value = entry.getValue();
 
-            Map<String, SensorData> sensorMap = deviceSensorData.computeIfAbsent(device, k -> new HashMap<>());
-            SensorData data = sensorMap.computeIfAbsent(sensor, k -> new SensorData());
+            SensorData data = sensorMap.computeIfAbsent(sensor, k -> new SensorData(value, ts));
 
-            if (isDataBlocked(ts, data, value)) {
-                suspicious = true;
+            if (data.value == value) {
+                if (ts - data.startTime >= blockDurationMs) {
+                    suspicious = true;
+                }
             } else {
-                resetSensorData(data, value, ts);
+                sensorMap.put(sensor, new SensorData(value, ts));
             }
-
-            maintainSlidingWindow(data, value);
         }
 
         return suspicious;
-    }
-
-    private boolean isDataBlocked(long ts, SensorData data, double value) {
-        return data.value == value && (ts - data.startTime >= blockDurationMs);
-    }
-
-    private void resetSensorData(SensorData data, double value, long ts) {
-        data.value = value;
-        data.startTime = ts;
-    }
-
-    private void maintainSlidingWindow(SensorData data, double value) {
-        if (data.window == null) {
-            data.window = new LinkedList<>();
-        }
-        if (data.window.size() >= WINDOW_SIZE) {
-            data.window.removeFirst();
-        }
-        data.window.addLast(value);
     }
 
     private void emitData(Tuple input, long ts, String device, Map<String, Double> sensorData, boolean suspicious) {

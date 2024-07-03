@@ -63,8 +63,8 @@ public class FalseSpikeBolt extends BaseRichBolt {
 
             // Check for spike
             double mean = window.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-            final double threshold = 1.2;
-            if (value >= mean * threshold) {
+            final double threshold = 0.5;
+            if (value >= mean + (mean * threshold) || value <= mean - (mean * threshold)) {
                 log.warn("Detected false spike in sensor {} on device {}: {}", sensor, device, value);
                 window.removeLast();
                 suspicious = true; // Mark as suspicious

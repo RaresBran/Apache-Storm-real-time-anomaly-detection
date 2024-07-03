@@ -23,7 +23,7 @@ public class KafkaSpoutConfigBuilder {
                 .setProp(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName())
                 .setProp(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
                 .setRetry(retryService)
-                .setFirstPollOffsetStrategy(FirstPollOffsetStrategy.LATEST)
+                .setFirstPollOffsetStrategy(FirstPollOffsetStrategy.UNCOMMITTED_LATEST)
                 .build();
     }
 }

@@ -1,12 +1,14 @@
 package org.project;
 
 import org.apache.storm.Config;
+import org.apache.storm.LocalCluster;
 import org.apache.storm.StormSubmitter;
 import org.apache.storm.kafka.spout.KafkaSpout;
 import org.apache.storm.kafka.spout.KafkaSpoutConfig;
 import org.apache.storm.topology.ConfigurableTopology;
 import org.apache.storm.topology.TopologyBuilder;
 import org.apache.storm.tuple.Fields;
+import org.apache.storm.utils.Utils;
 import org.project.bolt.*;
 import org.project.bolt.cleaning.*;
 import org.project.spout.KafkaSpoutConfigBuilder;
@@ -75,7 +77,8 @@ public class SensorTopology extends ConfigurableTopology {
         builder.setBolt("false-spikes-bolt", new FalseSpikeBolt(), 3)
                 .fieldsGrouping("data-outliers-bolt", new Fields(DEVICE_ID_FIELD));
 
-        builder.setBolt("value-blocked-bolt", new ValueBlockedBolt(12 * 60 * 60 * 1000L), 3)
+        // 12 * 60 * 60 * 1000L
+        builder.setBolt("value-blocked-bolt", new ValueBlockedBolt(2 * 60 * 1000L), 3)
                 .fieldsGrouping("false-spikes-bolt", new Fields(DEVICE_ID_FIELD));
 
         builder.setBolt("threshold-bolt", new ThresholdBolt(redisHost, redisPort), 3)
@@ -90,8 +93,8 @@ public class SensorTopology extends ConfigurableTopology {
                 .shuffleGrouping("threshold-bolt", ALERT_STREAM);
 
 
-//        builder.setBolt("print-bolt", tuple -> log.info(tuple.toString()))
-//                .shuffleGrouping("value-blocked-bolt");
+        builder.setBolt("print-bolt", tuple -> log.info(tuple.toString()))
+                .shuffleGrouping("value-blocked-bolt");
 
         Config conf = new Config();
         conf.setDebug(false);
